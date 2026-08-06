@@ -1,0 +1,26 @@
+Project Specification - AI Job Application Tracker
+
+Project Name: CareerLens (working title)
+
+Goal: Build a production-ready web application that automatically
+synchronizes a user’s Gmail account, detects job applications and
+recruiter responses, and presents analytics in a modern dashboard.
+
+Core Features - Google OAuth with Laravel Socialite - Gmail API
+integration - Incremental email synchronization - AI-powered email
+classification - Company and position extraction - Interview,
+assessment, rejection and offer detection - Dashboard with charts and
+KPIs - Search and filtering - AI assistant powered by Laravel MCP
+
+Dashboard - Total Applications - Active Applications - Interviews -
+Assessments - Offers - Rejections - Companies Applied - Monthly
+Application Trend - Response Rate - Recent Activity
+
+Application Detail - Original email - AI summary - Attachments -
+Timeline - Status history
+
+Search & Filters - Company - Position - Status - Date range - Recruiter
+
+Non-functional Requirements - Responsive UI - Dark mode - Queue for
+heavy processing - Scheduler for automatic sync - Production-ready
+code - Secure OAuth token storage - Pest tests

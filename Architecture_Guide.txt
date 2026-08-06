@@ -1,0 +1,29 @@
+Architecture Guide - Laravel 13
+
+Architecture - Laravel 13 - React + Inertia + TypeScript - Tailwind
+CSS - MySQL
+
+Suggested Structure
+
+app/ Actions/ AI/ Agents/ Prompts/ Tools/ DTO/ Enums/ Jobs/ Models/
+Policies/ Services/ Gmail/ Google/ AI/ Statistics/ Support/
+
+Flow
+
+User -> Google OAuth -> Gmail API -> Queue Job -> AI Processing ->
+Database -> Dashboard
+
+Database Tables - users - gmail_accounts - gmail_messages -
+applications - companies - recruiters - attachments - interviews -
+statuses - sync_logs - ai_predictions
+
+Queues - Sync Gmail - Process AI - Parse Attachments
+
+Scheduler - Periodic Gmail synchronization
+
+MCP Tools - countApplications() - getStatistics() - getApplications() -
+searchApplications() - getInterviews() - getRejected()
+
+Guidelines - Thin controllers - Service layer - Form Requests - Eloquent
+relationships - SOLID - PSR-12 - Dependency Injection - Avoid duplicated
+code
