@@ -24,6 +24,7 @@ class ApplicationDetailController extends Controller
                 'source' => $application->source,
                 'notes' => $application->notes,
                 'summary' => $application->summary,
+                'attachments' => $application->attachments ?? [],
             ],
         ]);
     }

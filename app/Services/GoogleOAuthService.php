@@ -13,6 +13,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use function Laravel\Ai\agent;
 use Laravel\Socialite\Two\User as SocialiteUser;
 use RuntimeException;
 
@@ -73,8 +74,7 @@ class GoogleOAuthService
                 }
 
                 $detailResponse = $this->http()->withToken($token)->get(self::GMAIL_MESSAGES_ENDPOINT.'/'.$messageId, [
-                    'format' => 'metadata',
-                    'metadataHeaders' => ['Subject', 'From', 'To', 'Date'],
+                    'format' => 'full',
                 ])->throw()->json();
 
                 $synced += $this->storeEmailMessage($googleAccount, $detailResponse) ? 1 : 0;
@@ -139,6 +139,8 @@ class GoogleOAuthService
         $labelIds = (array) Arr::get($messageData, 'labelIds', []);
         $isSent = in_array('SENT', $labelIds, true);
         $receivedAt = Arr::get($messageData, 'internalDate') ? Carbon::createFromTimestampMs((int) Arr::get($messageData, 'internalDate')) : null;
+        $body = $this->extractBodyText(Arr::get($messageData, 'payload', []));
+        $attachments = $this->extractAttachments(Arr::get($messageData, 'payload', []));
 
         $classification = $this->classifyMessage($subject, $snippet, $from, $to, $isSent);
 
@@ -159,10 +161,23 @@ class GoogleOAuthService
             'name' => $classification['recruiter_name'] ?? $classification['company_name'],
         ]) : null;
 
-        Application::firstOrCreate(
+        $gmailMessageId = (string) Arr::get($messageData, 'id');
+        $application = Application::where('user_id', $googleAccount->user_id)
+            ->where('gmail_message_id', $gmailMessageId)
+            ->first();
+
+        $notes = trim($subject."\n\n".$body);
+        $summary = $application?->summary;
+
+        // Call AI only if it's a new application or if the previous notes were truncated (shorter)
+        if (! $application || strlen($notes) > strlen($application->notes ?? '') + 50) {
+            $summary = $this->summarizeMessage($subject, $snippet, $from, $body);
+        }
+
+        Application::updateOrCreate(
             [
                 'user_id' => $googleAccount->user_id,
-                'gmail_message_id' => (string) Arr::get($messageData, 'id'),
+                'gmail_message_id' => $gmailMessageId,
             ],
             [
                 'company_id' => $company->id,
@@ -171,8 +186,9 @@ class GoogleOAuthService
                 'status' => $classification['status'],
                 'application_date' => $receivedAt?->toDateString() ?? now()->toDateString(),
                 'source' => $isSent ? 'Sent Mail' : ($classification['source'] ?? 'Gmail'),
-                'notes' => trim($subject.' '.$snippet),
-                'summary' => $this->summarizeMessage($subject, $snippet, $from),
+                'notes' => $notes,
+                'summary' => $summary,
+                'attachments' => $attachments,
             ]
         );
 
@@ -338,9 +354,102 @@ class GoogleOAuthService
         return preg_match('/^([^<]+)</', $from, $matches) === 1 ? trim($matches[1], ' "') : null;
     }
 
-    private function summarizeMessage(string $subject, string $snippet, string $from): string
+    private function extractBodyText(array $payload): string
     {
-        return Str::of(trim($subject.' '.$snippet.' '.$from))->limit(220)->toString();
+        if (! empty($payload['body']['data'])) {
+            return $this->decodeBase64Url($payload['body']['data']);
+        }
+
+        if (! empty($payload['parts'])) {
+            foreach ($payload['parts'] as $part) {
+                if ($part['mimeType'] === 'text/plain') {
+                    return $this->decodeBase64Url($part['body']['data'] ?? '');
+                }
+            }
+            foreach ($payload['parts'] as $part) {
+                if ($part['mimeType'] === 'text/html') {
+                    return strip_tags($this->decodeBase64Url($part['body']['data'] ?? ''));
+                }
+            }
+            foreach ($payload['parts'] as $part) {
+                if (isset($part['parts'])) {
+                    $text = $this->extractBodyText($part);
+                    if (! empty($text)) {
+                        return $text;
+                    }
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function extractAttachments(array $payload): array
+    {
+        $attachments = [];
+
+        if (! empty($payload['parts'])) {
+            foreach ($payload['parts'] as $part) {
+                if (! empty($part['filename']) && ! empty($part['body']['attachmentId'])) {
+                    $attachments[] = [
+                        'id' => $part['body']['attachmentId'],
+                        'filename' => $part['filename'],
+                        'mimeType' => $part['mimeType'] ?? 'application/octet-stream',
+                        'size' => $part['body']['size'] ?? 0,
+                    ];
+                }
+
+                if (isset($part['parts'])) {
+                    $attachments = array_merge($attachments, $this->extractAttachments($part));
+                }
+            }
+        }
+
+        return $attachments;
+    }
+
+    public function getAttachmentData(GoogleAccount $googleAccount, string $messageId, string $attachmentId): ?array
+    {
+        $token = $this->refreshAccessTokenIfNeeded($googleAccount);
+
+        $response = $this->http()->withToken($token)
+            ->get(self::GMAIL_MESSAGES_ENDPOINT.'/'.$messageId.'/attachments/'.$attachmentId)
+            ->json();
+
+        if (empty($response['data'])) {
+            return null;
+        }
+
+        return [
+            'data' => $this->decodeBase64Url($response['data']),
+            'size' => $response['size'] ?? 0,
+        ];
+    }
+
+    private function decodeBase64Url(string $data): string
+    {
+        $remainder = strlen($data) % 4;
+        if ($remainder) {
+            $padlen = 4 - $remainder;
+            $data .= str_repeat('=', $padlen);
+        }
+        return base64_decode(strtr($data, '-_', '+/')) ?: '';
+    }
+
+    private function summarizeMessage(string $subject, string $snippet, string $from, string $body = ''): string
+    {
+        $content = trim($subject.' '.$snippet.' '.$from."\n\n".$body);
+        $content = Str::limit($content, 3500);
+
+        try {
+            $response = agent(instructions: 'You are an assistant. Summarize this job application email. Output only the summary in 1-2 short sentences, no greetings.')
+                ->prompt($content);
+                
+            return trim($response->text);
+        } catch (\Throwable $e) {
+            report($e);
+            return Str::limit($content, 220);
+        }
     }
 
     private function http(): PendingRequest

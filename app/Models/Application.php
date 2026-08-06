@@ -18,10 +18,12 @@ class Application extends Model
         'gmail_message_id',
         'notes',
         'summary',
+        'attachments',
     ];
 
     protected $casts = [
         'application_date' => 'date',
+        'attachments' => 'array',
     ];
 
     public function user(): BelongsTo

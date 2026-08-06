@@ -63,10 +63,12 @@ export default function ApplicationsIndex() {
 
     const getStatusStyle = (st: string) => {
         switch (st.toLowerCase()) {
+            case 'applied':
+                return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
             case 'interview':
                 return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
             case 'assessment':
-                return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+                return 'bg-purple-500/10 text-purple-400 border-purple-500/20';
             case 'offer':
                 return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
             case 'rejection':
@@ -74,6 +76,28 @@ export default function ApplicationsIndex() {
                 return 'bg-rose-500/10 text-rose-500 border-rose-500/20';
             default:
                 return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+        }
+    };
+
+    const getSourceStyle = (source: string) => {
+        switch (source.toLowerCase()) {
+            case 'linkedin':
+                return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+            case 'jobstreet':
+                return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20';
+            case 'kalibrr':
+                return 'bg-orange-500/10 text-orange-400 border-orange-500/20';
+            case 'glints':
+                return 'bg-red-500/10 text-red-400 border-red-500/20';
+            case 'tech in asia':
+            case 'techinasia':
+                return 'bg-teal-500/10 text-teal-400 border-teal-500/20';
+            case 'gmail':
+                return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+            case 'sent mail':
+                return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+            default:
+                return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
         }
     };
 
@@ -173,7 +197,7 @@ export default function ApplicationsIndex() {
                                         </div>
                                         <div className="flex items-center gap-2 text-sm text-slate-400 flex-wrap">
                                             <span className="font-medium text-slate-300">{app.company_name}</span>
-                                            {app.recruiter_name && (
+                                            {app.recruiter_name && app.recruiter_name !== app.source && (
                                                 <>
                                                     <span>•</span>
                                                     <span>{app.recruiter_name}</span>
@@ -182,7 +206,7 @@ export default function ApplicationsIndex() {
                                             {app.source && (
                                                 <>
                                                     <span>•</span>
-                                                    <span className="rounded-md bg-slate-800 px-2 py-0.5 text-xs text-slate-400 border border-slate-700/50">
+                                                    <span className={`rounded-md px-2 py-0.5 text-xs border ${getSourceStyle(app.source)}`}>
                                                         {app.source}
                                                     </span>
                                                 </>
