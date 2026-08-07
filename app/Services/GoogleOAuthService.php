@@ -25,9 +25,9 @@ class GoogleOAuthService
 
     private const GMAIL_MESSAGES_ENDPOINT = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
 
-    private const SYNC_QUERY = 'in:sent OR from:jobs-noreply@linkedin.com OR (from:jobstreet.com AND ("berhasil dikirim" OR "lamaran" OR "aplikasi" OR "status")) OR (subject:(interview OR assessment OR psikotes OR "technical test" OR "coding test" OR offer OR rejection OR "status lamaran" OR "undangan" OR "panggilan") OR "application received" OR "thanks for applying" OR "terima kasih telah melamar")';
+    private const SYNC_QUERY = 'in:sent OR from:jobs-noreply@linkedin.com OR from:jobstreet.com OR from:dealls.com OR from:glints.com OR from:kalibrr.com OR from:indeed.com OR from:techinasia.com OR (subject:(interview OR assessment OR psikotes OR "technical test" OR "coding test" OR offer OR rejection OR "status lamaran" OR "undangan" OR "panggilan") OR "application received" OR "thanks for applying" OR "terima kasih telah melamar")';
 
-    private const MAX_PAGES_PER_SYNC = 5;
+    private const MAX_PAGES_PER_SYNC = 15;
 
     private const MESSAGES_PER_PAGE = 50;
 
@@ -50,11 +50,15 @@ class GoogleOAuthService
         );
     }
 
-    public function syncMailbox(GoogleAccount $googleAccount): array
+    public function syncMailbox(GoogleAccount $googleAccount, ?callable $onProgress = null, bool $forceFullSync = false): array
     {
         $token = $this->refreshAccessTokenIfNeeded($googleAccount);
-        $lastSyncedAt = $googleAccount->last_synced_at?->timestamp ?? now()->subDays(90)->timestamp;
-        $query = 'after:'.$lastSyncedAt.' ('.self::SYNC_QUERY.')';
+        $lastSyncedAt = $forceFullSync ? null : ($googleAccount->last_synced_at?->timestamp ?? now()->subDays(90)->timestamp);
+        
+        $query = self::SYNC_QUERY;
+        if ($lastSyncedAt) {
+            $query = 'after:'.$lastSyncedAt.' ('.$query.')';
+        }
 
         $pageToken = null;
         $synced = 0;
@@ -77,7 +81,12 @@ class GoogleOAuthService
                     'format' => 'full',
                 ])->throw()->json();
 
-                $synced += $this->storeEmailMessage($googleAccount, $detailResponse) ? 1 : 0;
+                if ($this->storeEmailMessage($googleAccount, $detailResponse)) {
+                    $synced++;
+                    if ($onProgress) {
+                        $onProgress(['synced' => $synced, 'message_id' => $messageId]);
+                    }
+                }
             }
 
             $pageToken = Arr::get($messagesResponse, 'nextPageToken');
@@ -225,6 +234,7 @@ class GoogleOAuthService
             Str::contains($fromLower, 'kalibrr.com') => 'Kalibrr',
             Str::contains($fromLower, 'indeed.com') => 'Indeed',
             Str::contains($fromLower, 'techinasia.com') => 'Tech in Asia',
+            Str::contains($fromLower, 'dealls.com') => 'Dealls',
             default => null,
         };
 
@@ -356,19 +366,25 @@ class GoogleOAuthService
 
     private function extractBodyText(array $payload): string
     {
+        $mimeType = $payload['mimeType'] ?? '';
+
         if (! empty($payload['body']['data'])) {
-            return $this->decodeBase64Url($payload['body']['data']);
+            $decoded = $this->decodeBase64Url($payload['body']['data']);
+            if ($mimeType === 'text/html') {
+                return $this->cleanHtmlText($decoded);
+            }
+            return $decoded;
         }
 
         if (! empty($payload['parts'])) {
             foreach ($payload['parts'] as $part) {
-                if ($part['mimeType'] === 'text/plain') {
+                if (($part['mimeType'] ?? '') === 'text/plain') {
                     return $this->decodeBase64Url($part['body']['data'] ?? '');
                 }
             }
             foreach ($payload['parts'] as $part) {
-                if ($part['mimeType'] === 'text/html') {
-                    return strip_tags($this->decodeBase64Url($part['body']['data'] ?? ''));
+                if (($part['mimeType'] ?? '') === 'text/html') {
+                    return $this->cleanHtmlText($this->decodeBase64Url($part['body']['data'] ?? ''));
                 }
             }
             foreach ($payload['parts'] as $part) {
@@ -382,6 +398,33 @@ class GoogleOAuthService
         }
 
         return '';
+    }
+
+    private function cleanHtmlText(string $html): string
+    {
+        // Remove style and script tags completely (including their content)
+        $html = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $html);
+        $html = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $html);
+        
+        // Remove doctype and XML declarations
+        $html = preg_replace('/<!DOCTYPE[^>]*>/i', '', $html);
+        $html = preg_replace('/<\?xml[^>]*>/i', '', $html);
+        
+        // Convert some common tags to newlines to preserve basic structure
+        $html = preg_replace('/<br\s*\/?>/i', "\n", $html);
+        $html = preg_replace('/<\/p>/i', "\n\n", $html);
+        $html = preg_replace('/<\/div>/i', "\n", $html);
+        
+        // Strip remaining HTML tags
+        $text = strip_tags($html);
+        
+        // Decode html entities
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        
+        // Clean up excessive whitespace and newlines
+        $text = preg_replace("/\n\s+\n/", "\n\n", $text);
+        
+        return trim($text);
     }
 
     private function extractAttachments(array $payload): array
